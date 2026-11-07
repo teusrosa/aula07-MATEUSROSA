@@ -1,0 +1,55 @@
+# pipeline.yml — esteira da Aula 07: testar -> homologar -> publicar (produção)
+# (versão de TESTE do professor; a versão final dos alunos terá mais comentários)
+
+name: Pipeline de entrega          # nome que aparece na aba Actions
+
+on:
+  push:
+    branches: [main]               # roda a cada commit enviado para a main
+  workflow_dispatch:               # permite rodar na mão (botão Run workflow)
+
+permissions:
+  contents: read                   # por padrão o robô só pode LER o repositório
+
+concurrency:
+  group: pages                     # só um deploy por vez
+  cancel-in-progress: false        # não cancela um deploy que já começou
+
+jobs:
+  testar:                          # 1) portão de qualidade (Aula 05)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6  # baixa o código para a máquina do robô
+      - name: Rodar os testes
+        run: npm test              # exit code diferente de 0 = pipeline vermelho
+      - name: Montar a pasta dist
+        run: |
+          mkdir dist
+          cp site/index.html dist/index.html
+      - name: Empacotar o site (artefato)
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist               # pasta que vira o artefato
+
+  homologacao:                     # 2) ensaio geral: verificação rápida (smoke test)
+    needs: testar                  # só roda se "testar" passou
+    runs-on: ubuntu-24.04
+    environment: homologacao       # ambiente sem aprovação
+    steps:
+      - uses: actions/checkout@v6
+      - name: Smoke test - a página tem o marcador de versão?
+        run: grep -q 'id="versao"' site/index.html
+
+  producao:                        # 3) publicação no ambiente real
+    needs: homologacao             # só roda se a homologação passou
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write                 # permissão para publicar no Pages
+      id-token: write              # prova de origem do deploy
+    environment:
+      name: github-pages           # ambiente de produção do Pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
